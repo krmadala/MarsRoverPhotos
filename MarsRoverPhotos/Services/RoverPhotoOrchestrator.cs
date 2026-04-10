@@ -97,6 +97,26 @@ public sealed class RoverPhotoOrchestrator : IRoverPhotoOrchestrator
 
         try
         {
+            // ── Early-exit: skip the NASA API call entirely if photos are
+            //    already on disk. No network round-trip needed.
+            if (_imageDownloader.IsAlreadyDownloaded(earthDate, out var existingCount))
+            {
+                _logger.LogInformation(
+                    "Skipping NASA API call for {Rover} on {Date} — {Count} photos already on disk.",
+                    rover, earthDate, existingCount);
+
+                results[index] = new PhotoDownloadResult
+                {
+                    OriginalInput  = parseResult.OriginalValue,
+                    ParsedDate     = earthDate,
+                    IsValid        = true,
+                    AlreadyDownloaded = true,
+                    ImagesDownloaded  = existingCount
+                };
+                return;
+            }
+
+            // ── Photos not yet downloaded: call NASA API then download.
             var photos = await _nasaClient.GetPhotosAsync(earthDate, rover, cancellationToken);
 
             if (photos.Count == 0)
