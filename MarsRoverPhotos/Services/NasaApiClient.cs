@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json;
 using MarsRoverPhotos.Configuration;
 using MarsRoverPhotos.Models;
@@ -18,6 +17,49 @@ public sealed class NasaApiClient : INasaApiClient
         PropertyNameCaseInsensitive = true
     };
 
+    // All five NASA Mars rovers with key facts.
+    private static readonly IReadOnlyList<MarsRover> KnownRovers = new[]
+    {
+        new MarsRover
+        {
+            Name        = "curiosity",
+            Status      = "active",
+            LandingDate = "2012-08-06",
+            Description = "Car-sized rover still exploring Gale Crater. Longest-running Mars surface mission."
+        },
+        new MarsRover
+        {
+            Name        = "perseverance",
+            Status      = "active",
+            LandingDate = "2021-02-18",
+            Description = "Seeking signs of ancient life in Jezero Crater. Deployed Ingenuity helicopter."
+        },
+        new MarsRover
+        {
+            Name        = "opportunity",
+            Status      = "complete",
+            LandingDate = "2004-01-25",
+            LastActiveDate = "2018-06-10",
+            Description = "Operated for 15 years — 45x its planned 90-day mission. Explored Meridiani Planum."
+        },
+        new MarsRover
+        {
+            Name        = "spirit",
+            Status      = "complete",
+            LandingDate = "2004-01-04",
+            LastActiveDate = "2010-03-22",
+            Description = "Twin of Opportunity. Explored Gusev Crater for over 6 years."
+        },
+        new MarsRover
+        {
+            Name        = "sojourner",
+            Status      = "complete",
+            LandingDate = "1997-07-04",
+            LastActiveDate = "1997-09-27",
+            Description = "First Mars rover. Part of the Mars Pathfinder mission. Operated for 83 days."
+        }
+    };
+
     public NasaApiClient(HttpClient httpClient, IOptions<NasaApiSettings> settings, ILogger<NasaApiClient> logger)
     {
         _httpClient = httpClient;
@@ -25,15 +67,18 @@ public sealed class NasaApiClient : INasaApiClient
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<RoverPhoto>> GetPhotosAsync(string earthDate, CancellationToken cancellationToken = default)
-    {
-        // The old api.nasa.gov/mars-photos backend was decommissioned (Heroku).
-        // We now use the NASA Image and Video Library which requires no API key.
-        var year = DateTime.ParseExact(earthDate, "yyyy-MM-dd", CultureInfo.InvariantCulture).Year;
-        var query = Uri.EscapeDataString(_settings.SearchQuery);
-        var url = $"{_settings.BaseUrl}/search?q={query}&media_type=image&year_start={year}&year_end={year}&page=1";
+    public IReadOnlyList<MarsRover> GetAvailableRovers() => KnownRovers;
 
-        _logger.LogInformation("Fetching Mars photos for {Date} (year {Year}) from NASA Image Library", earthDate, year);
+    public async Task<IReadOnlyList<RoverPhoto>> GetPhotosAsync(
+        string earthDate,
+        string rover,
+        CancellationToken cancellationToken = default)
+    {
+        var roverName = rover.ToLowerInvariant();
+        var url = $"{_settings.BaseUrl}/rovers/{roverName}/photos" +
+                  $"?earth_date={earthDate}&api_key={_settings.ApiKey}";
+
+        _logger.LogInformation("Fetching {Rover} photos for {Date}", roverName, earthDate);
 
         try
         {
@@ -41,44 +86,21 @@ public sealed class NasaApiClient : INasaApiClient
             response.EnsureSuccessStatusCode();
 
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
-            var apiResponse = JsonSerializer.Deserialize<NasaImageLibraryResponse>(content, JsonOptions);
+            var apiResponse = JsonSerializer.Deserialize<NasaApiResponse>(content, JsonOptions);
 
-            var photos = MapToRoverPhotos(apiResponse?.Collection.Items ?? new(), earthDate);
-            _logger.LogInformation("Found {Count} photos for {Date}", photos.Count, earthDate);
+            var photos = apiResponse?.Photos ?? new List<RoverPhoto>();
+            _logger.LogInformation("NASA API returned {Count} photos for {Rover} on {Date}", photos.Count, roverName, earthDate);
             return photos;
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "HTTP error calling NASA Image Library for {Date}: {StatusCode}", earthDate, ex.StatusCode);
+            _logger.LogError(ex, "HTTP error calling NASA API for {Rover} on {Date}: {StatusCode}", roverName, earthDate, ex.StatusCode);
             throw;
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            _logger.LogError(ex, "NASA Image Library request timed out for {Date}", earthDate);
-            throw new TimeoutException($"Request to NASA Image Library timed out for date {earthDate}.", ex);
+            _logger.LogError(ex, "NASA API request timed out for {Rover} on {Date}", roverName, earthDate);
+            throw new TimeoutException($"Request to NASA API timed out for {roverName} on {earthDate}.", ex);
         }
-    }
-
-    private static List<RoverPhoto> MapToRoverPhotos(List<ImageItem> items, string earthDate)
-    {
-        var photos = new List<RoverPhoto>(items.Count);
-
-        foreach (var item in items)
-        {
-            var imageUrl = item.Links.FirstOrDefault(l => l.Render == "image")?.Href;
-            if (string.IsNullOrEmpty(imageUrl)) continue;
-
-            var data = item.Data.FirstOrDefault();
-            if (data is null) continue;
-
-            photos.Add(new RoverPhoto
-            {
-                Id = Math.Abs(data.NasaId.GetHashCode()),
-                ImgSrc = imageUrl,
-                EarthDate = earthDate
-            });
-        }
-
-        return photos;
     }
 }

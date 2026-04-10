@@ -25,7 +25,10 @@ public sealed class RoverPhotoOrchestrator : IRoverPhotoOrchestrator
         _logger = logger;
     }
 
-    public async Task<ProcessSummary> ProcessDatesFileAsync(string filePath, CancellationToken cancellationToken = default)
+    public async Task<ProcessSummary> ProcessDatesFileAsync(
+        string filePath,
+        string rover,
+        CancellationToken cancellationToken = default)
     {
         var lines = await _fileReader.ReadLinesAsync(filePath);
         var parseResults = _dateParser.ParseAll(lines);
@@ -40,7 +43,6 @@ public sealed class RoverPhotoOrchestrator : IRoverPhotoOrchestrator
         // Allocate results array to preserve original input order.
         var results = new PhotoDownloadResult[parseResults.Count];
 
-        // Fill in invalid dates immediately — no I/O needed.
         for (var i = 0; i < parseResults.Count; i++)
         {
             if (!parseResults[i].IsValid)
@@ -60,7 +62,9 @@ public sealed class RoverPhotoOrchestrator : IRoverPhotoOrchestrator
             .Where(x => x.Result.IsValid)
             .ToList();
 
-        var tasks = validEntries.Select(entry => ProcessValidDateAsync(entry.Result, entry.Index, results, cancellationToken));
+        var tasks = validEntries.Select(entry =>
+            ProcessValidDateAsync(entry.Result, entry.Index, rover, results, cancellationToken));
+
         await Task.WhenAll(tasks);
 
         summary.Results = results.ToList();
@@ -68,8 +72,8 @@ public sealed class RoverPhotoOrchestrator : IRoverPhotoOrchestrator
         summary.TotalDatesSkipped = results.Count(r => r?.AlreadyDownloaded == true);
 
         _logger.LogInformation(
-            "Summary — total: {Total}, valid: {Valid}, invalid: {Invalid}, images downloaded: {Images}, skipped: {Skipped}",
-            summary.TotalDatesProcessed, summary.ValidDates, summary.InvalidDates,
+            "Summary — rover: {Rover}, total: {Total}, valid: {Valid}, invalid: {Invalid}, images: {Images}, skipped: {Skipped}",
+            rover, summary.TotalDatesProcessed, summary.ValidDates, summary.InvalidDates,
             summary.TotalImagesDownloaded, summary.TotalDatesSkipped);
 
         return summary;
@@ -78,6 +82,7 @@ public sealed class RoverPhotoOrchestrator : IRoverPhotoOrchestrator
     private async Task ProcessValidDateAsync(
         DateParseResult parseResult,
         int index,
+        string rover,
         PhotoDownloadResult[] results,
         CancellationToken cancellationToken)
     {
@@ -92,12 +97,12 @@ public sealed class RoverPhotoOrchestrator : IRoverPhotoOrchestrator
 
         try
         {
-            var photos = await _nasaClient.GetPhotosAsync(earthDate, cancellationToken);
+            var photos = await _nasaClient.GetPhotosAsync(earthDate, rover, cancellationToken);
 
             if (photos.Count == 0)
             {
-                _logger.LogWarning("No photos available from NASA API for {Date}", earthDate);
-                baseResult.Error = $"No photos available for {earthDate}.";
+                _logger.LogWarning("No photos found for {Rover} on {Date}", rover, earthDate);
+                baseResult.Error = $"No photos available for {rover} on {earthDate}.";
                 results[index] = baseResult;
                 return;
             }
@@ -108,7 +113,7 @@ public sealed class RoverPhotoOrchestrator : IRoverPhotoOrchestrator
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Error processing date {Date}", earthDate);
+            _logger.LogError(ex, "Error processing {Rover} on {Date}", rover, earthDate);
             baseResult.Error = ex.Message;
             results[index] = baseResult;
         }
