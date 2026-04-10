@@ -1,5 +1,11 @@
 # Mars Rover Photos API
 
+<p style="color:red; font-weight:bold;">
+⚠️ The original api.nasa.gov/mars-photos API was a community-built app (corincerami/mars-photo-api) hosted on Heroku. 
+It was archived in October 2025 and the Heroku app is gone. 
+Every request returns a Heroku "no-such-app" 404 page — it's not coming back.
+</p>
+
 An ASP.NET Core 8 Web API that reads dates from a text file, calls the
 [NASA Mars Rover Photos API](https://api.nasa.gov/), and downloads rover
 images locally in a structured `photos/{date}/` folder.
