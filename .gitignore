@@ -1,0 +1,22 @@
+## .NET build outputs
+bin/
+obj/
+
+## Visual Studio
+.vs/
+*.user
+*.suo
+
+## Rider
+.idea/
+
+## NuGet
+*.nupkg
+packages/
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Secrets / env
+appsettings.*.local.json
